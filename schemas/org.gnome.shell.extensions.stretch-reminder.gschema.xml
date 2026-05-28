@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.stretch-reminder"
+          path="/org/gnome/shell/extensions/stretch-reminder/">
+
+    <key name="work-duration" type="i">
+      <default>30</default>
+      <summary>Work Duration (minutes)</summary>
+      <description>Time spent working before a break reminder (10–120).</description>
+    </key>
+
+    <key name="break-duration" type="i">
+      <default>30</default>
+      <summary>Break Duration (seconds)</summary>
+      <description>Time forced to rest/stretch during the block overlay (10–300).</description>
+    </key>
+
+    <key name="idle-threshold" type="i">
+      <default>3</default>
+      <summary>Idle Timeout (minutes)</summary>
+      <description>Automatically pause timer if inactive for this long (1–15).</description>
+    </key>
+
+  </schema>
+</schemalist>
