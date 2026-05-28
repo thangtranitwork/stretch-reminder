@@ -28,8 +28,8 @@ export default class StretchReminderPreferences extends ExtensionPreferences {
             title: 'Work Duration (Minutes)',
             subtitle: 'How long to work before being prompted to stand up',
             adjustment: new Gtk.Adjustment({
-                lower: 5, upper: 120,
-                step_increment: 5, page_increment: 10,
+                lower: 1, upper: 120,
+                step_increment: 1, page_increment: 5,
                 value: settings.get_int('work-duration'),
             }),
         });

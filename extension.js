@@ -1,3 +1,4 @@
+import GObject from 'gi://GObject';
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -7,6 +8,7 @@ import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+import * as ModalDialog from 'resource:///org/gnome/shell/ui/modalDialog.js';
 
 const STRETCH_TIPS = [
     "🧘 Đứng dậy, vươn vai và hít thở thật sâu.",
@@ -19,38 +21,31 @@ const STRETCH_TIPS = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Fullscreen Break Overlay Class
+// Fullscreen Break Overlay Class using GNOME's native ModalDialog
 // ─────────────────────────────────────────────────────────────────────────────
-class StretchBreakOverlay extends St.BoxLayout {
-    constructor(extension, durationSeconds, callbackOnFinished) {
-        super({
-            style_class: 'stretch-overlay-background',
-            vertical: true,
-            align_content: Clutter.Align.CENTER,
-            pack_start: true,
-            reactive: true,
-            can_focus: true
+const StretchBreakOverlay = GObject.registerClass({
+    GTypeName: 'StretchBreakOverlay',
+}, class StretchBreakOverlay extends ModalDialog.ModalDialog {
+    _init(extension, durationSeconds, callbackOnFinished) {
+        super._init({
+            styleClass: 'stretch-overlay-background',
+            destroyOnClose: true
         });
 
         this.extension = extension;
         this.durationRemaining = durationSeconds;
         this.callbackOnFinished = callbackOnFinished;
 
-        // Bọc toàn bộ nội dung vào box căn giữa
-        const contentBox = new St.BoxLayout({
-            style_class: 'stretch-overlay-content',
-            vertical: true,
-            x_align: Clutter.ActorAlign.CENTER,
-            y_align: Clutter.ActorAlign.CENTER
-        });
-        this.add_child(contentBox);
+        // Customise layout style
+        this.contentLayout.style_class = 'stretch-overlay-content';
+        this.contentLayout.vertical = true;
 
         // Tiêu đề
         const title = new St.Label({
             style_class: 'stretch-title',
             text: 'ĐÃ ĐẾN LÚC NGHỈ NGƠI!'
         });
-        contentBox.add_child(title);
+        this.contentLayout.add_child(title);
 
         // Gợi ý ngẫu nhiên
         const randomTip = STRETCH_TIPS[Math.floor(Math.random() * STRETCH_TIPS.length)];
@@ -58,56 +53,38 @@ class StretchBreakOverlay extends St.BoxLayout {
             style_class: 'stretch-tip',
             text: randomTip
         });
-        contentBox.add_child(tipLabel);
+        this.contentLayout.add_child(tipLabel);
 
         // Số giây đếm ngược
         this.timerLabel = new St.Label({
             style_class: 'stretch-timer',
             text: `${this.durationRemaining}s`
         });
-        contentBox.add_child(this.timerLabel);
+        this.contentLayout.add_child(this.timerLabel);
 
-        // Hàng nút bấm
-        const btnBox = new St.BoxLayout({
-            style_class: 'stretch-btn-container',
-            x_align: Clutter.ActorAlign.CENTER
-        });
-        contentBox.add_child(btnBox);
+        // Add bottom action buttons (standard ModalDialog style)
+        this.setButtons([
+            {
+                label: 'Bỏ qua',
+                action: () => this.closeDialog(false),
+                key: Clutter.KEY_Escape
+            },
+            {
+                label: 'Lùi 5 phút',
+                action: () => this.closeDialog(true),
+                key: Clutter.KEY_Return,
+                default: true
+            }
+        ]);
 
-        const skipBtn = new St.Button({
-            style_class: 'stretch-btn',
-            label: 'Bỏ qua',
-            reactive: true
-        });
-        skipBtn.connect('clicked', () => this.close(false));
-        btnBox.add_child(skipBtn);
-
-        const postponeBtn = new St.Button({
-            style_class: 'stretch-btn stretch-btn-primary',
-            label: 'Lùi 5 phút',
-            reactive: true
-        });
-        postponeBtn.connect('clicked', () => this.close(true));
-        btnBox.add_child(postponeBtn);
-
-        // Thêm vào UI chính của Shell và khóa tương tác bàn phím/chuột
-        Main.uiGroup.add_child(this);
-        this.set_size(global.stage.width, global.stage.height);
-        Main.pushModal(this);
-
-        // Lắng nghe sự kiện đổi kích thước màn hình
-        this._sizeChangedId = global.display.connect('workareas-changed', () => {
-            this.set_size(global.stage.width, global.stage.height);
-        });
-
-        // Bắt đầu đếm ngược thời gian nghỉ
+        // Đếm ngược thời gian nghỉ
         this._timerId = GLib.timeout_add_seconds(
             GLib.PRIORITY_DEFAULT,
             1,
             () => {
                 this.durationRemaining--;
                 if (this.durationRemaining <= 0) {
-                    this.close(false);
+                    this.closeDialog(false);
                     return GLib.SOURCE_REMOVE;
                 }
                 this.timerLabel.set_text(`${this.durationRemaining}s`);
@@ -116,24 +93,19 @@ class StretchBreakOverlay extends St.BoxLayout {
         );
     }
 
-    close(postponed = false) {
+    closeDialog(postponed = false) {
         if (this._timerId) {
             GLib.source_remove(this._timerId);
             this._timerId = null;
         }
-        if (this._sizeChangedId) {
-            global.display.disconnect(this._sizeChangedId);
-            this._sizeChangedId = null;
-        }
 
-        Main.popModal(this);
-        this.destroy();
+        this.close();
 
         if (this.callbackOnFinished) {
             this.callbackOnFinished(postponed);
         }
     }
-}
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Extension Class
@@ -264,7 +236,9 @@ export default class StretchReminder extends Extension {
     _updateUI() {
         if (!this._panelLabel) return;
 
-        const minutes = Math.ceil(this._timeLeftSec / 60);
+        const minutes = Math.floor(this._timeLeftSec / 60);
+        const seconds = this._timeLeftSec % 60;
+        const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
 
         if (this._isIdle) {
             this._panelLabel.set_text('💤 Nghỉ ngơi');
@@ -273,8 +247,8 @@ export default class StretchReminder extends Extension {
             this._panelLabel.set_text('🧘 Tạm dừng');
             if (this._statusItem) this._statusItem.label.set_text('Trạng thái: Tạm dừng');
         } else {
-            this._panelLabel.set_text(`🧘 ${minutes}m`);
-            if (this._statusItem) this._statusItem.label.set_text(`Trạng thái: Hoạt động (${minutes} phút còn lại)`);
+            this._panelLabel.set_text(`🧘 ${timeStr}`);
+            if (this._statusItem) this._statusItem.label.set_text(`Trạng thái: Hoạt động (${timeStr} còn lại)`);
         }
     }
 
@@ -290,6 +264,7 @@ export default class StretchReminder extends Extension {
                 this._resetTimer();
             }
         });
+        this._overlay.open();
     }
 
     // ── Smart Idle Monitor (Tự phát hiện khi đi ra ngoài) ─────────────────────
