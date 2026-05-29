@@ -21,5 +21,11 @@
       <description>Automatically pause timer if inactive for this long (1–15).</description>
     </key>
 
+    <key name="language" type="s">
+      <default>'auto'</default>
+      <summary>Language</summary>
+      <description>Display language (auto, en, vi)</description>
+    </key>
+
   </schema>
 </schemalist>

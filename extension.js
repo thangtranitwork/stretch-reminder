@@ -10,15 +10,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as ModalDialog from 'resource:///org/gnome/shell/ui/modalDialog.js';
 
-const STRETCH_TIPS = [
-    "🧘 Đứng dậy, vươn vai và hít thở thật sâu.",
-    "👀 Nhìn ra xa 6 mét (20 feet) để thư giãn cơ mắt.",
-    "🔄 Xoay khớp cổ tay và các ngón tay để giảm mỏi.",
-    "🙆 Nhún vai lên xuống và xoay bả vai nhẹ nhàng.",
-    "🚶 Đi bộ một vòng ngắn để kích hoạt tuần hoàn máu.",
-    "💧 Uống một ngụm nước để giữ ẩm cơ thể.",
-    "💆 Nhắm mắt lại và thả lỏng toàn bộ vùng mặt."
-];
+import { t, getLanguage } from './i18n.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fullscreen Break Overlay Class using GNOME's native ModalDialog
@@ -40,15 +32,18 @@ const StretchBreakOverlay = GObject.registerClass({
         this.contentLayout.style_class = 'stretch-overlay-content';
         this.contentLayout.vertical = true;
 
+        const lang = getLanguage(this.extension._settings);
+
         // Tiêu đề
         const title = new St.Label({
             style_class: 'stretch-title',
-            text: 'ĐÃ ĐẾN LÚC NGHỈ NGƠI!'
+            text: t(lang, 'break_title')
         });
         this.contentLayout.add_child(title);
 
         // Gợi ý ngẫu nhiên
-        const randomTip = STRETCH_TIPS[Math.floor(Math.random() * STRETCH_TIPS.length)];
+        const tips = t(lang, 'tips');
+        const randomTip = tips[Math.floor(Math.random() * tips.length)];
         const tipLabel = new St.Label({
             style_class: 'stretch-tip',
             text: randomTip
@@ -65,12 +60,12 @@ const StretchBreakOverlay = GObject.registerClass({
         // Add bottom action buttons (standard ModalDialog style)
         this.setButtons([
             {
-                label: 'Bỏ qua',
+                label: t(lang, 'skip'),
                 action: () => this.closeDialog(false),
                 key: Clutter.KEY_Escape
             },
             {
-                label: 'Lùi 5 phút',
+                label: t(lang, 'postpone'),
                 action: () => this.closeDialog(true),
                 key: Clutter.KEY_Return,
                 default: true
@@ -105,6 +100,18 @@ const StretchBreakOverlay = GObject.registerClass({
             this.callbackOnFinished(postponed);
         }
     }
+
+    destroy() {
+        if (this._timerId) {
+            GLib.source_remove(this._timerId);
+            this._timerId = null;
+        }
+        if (this.timerLabel) {
+            this.timerLabel.destroy();
+            this.timerLabel = null;
+        }
+        super.destroy();
+    }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -134,20 +141,20 @@ export default class StretchReminder extends Extension {
         this._indicator.add_child(this._panelLabel);
 
         // Menu Dropdown
-        const titleItem = new PopupMenu.PopupMenuItem('Stretch & Break Reminder', { reactive: false });
-        this._indicator.menu.addMenuItem(titleItem);
+        this._titleItem = new PopupMenu.PopupMenuItem('Stretch & Break Reminder', { reactive: false });
+        this._indicator.menu.addMenuItem(this._titleItem);
         this._indicator.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         this._statusItem = new PopupMenu.PopupMenuItem('Trạng thái: Hoạt động', { reactive: false });
         this._indicator.menu.addMenuItem(this._statusItem);
 
-        const resetItem = new PopupMenu.PopupMenuItem('Đặt lại bộ đếm');
-        resetItem.connect('activate', () => this._resetTimer());
-        this._indicator.menu.addMenuItem(resetItem);
+        this._resetItem = new PopupMenu.PopupMenuItem('Đặt lại bộ đếm');
+        this._resetItem.connect('activate', () => this._resetTimer());
+        this._indicator.menu.addMenuItem(this._resetItem);
 
-        const settingsItem = new PopupMenu.PopupMenuItem('Preferences…');
-        settingsItem.connect('activate', () => this.openPreferences());
-        this._indicator.menu.addMenuItem(settingsItem);
+        this._settingsItem = new PopupMenu.PopupMenuItem('Preferences…');
+        this._settingsItem.connect('activate', () => this.openPreferences());
+        this._indicator.menu.addMenuItem(this._settingsItem);
 
         Main.panel.addToStatusArea(this.uuid, this._indicator);
 
@@ -159,11 +166,16 @@ export default class StretchReminder extends Extension {
             if (key === 'idle-threshold') {
                 this._setupIdleMonitor();
             }
+            if (key === 'language') {
+                this._updateLocale();
+                this._updateUI();
+            }
         });
 
         // Bắt đầu
         this._setupIdleMonitor();
         this._startTimer();
+        this._updateLocale();
         this._updateUI();
     }
 
@@ -181,13 +193,36 @@ export default class StretchReminder extends Extension {
             this._settingsChangedId = null;
         }
 
+        if (this._panelLabel) {
+            this._panelLabel.destroy();
+            this._panelLabel = null;
+        }
+
+        if (this._titleItem) {
+            this._titleItem.destroy();
+            this._titleItem = null;
+        }
+
+        if (this._statusItem) {
+            this._statusItem.destroy();
+            this._statusItem = null;
+        }
+
+        if (this._resetItem) {
+            this._resetItem.destroy();
+            this._resetItem = null;
+        }
+
+        if (this._settingsItem) {
+            this._settingsItem.destroy();
+            this._settingsItem = null;
+        }
+
         if (this._indicator) {
             this._indicator.destroy();
             this._indicator = null;
         }
 
-        this._panelLabel = null;
-        this._statusItem = null;
         this._settings = null;
     }
 
@@ -233,22 +268,36 @@ export default class StretchReminder extends Extension {
         this._updateUI();
     }
 
+    _updateLocale() {
+        const lang = getLanguage(this._settings);
+        if (this._titleItem) {
+            this._titleItem.label.set_text(t(lang, 'title'));
+        }
+        if (this._resetItem) {
+            this._resetItem.label.set_text(t(lang, 'reset_timer'));
+        }
+        if (this._settingsItem) {
+            this._settingsItem.label.set_text(t(lang, 'preferences'));
+        }
+    }
+
     _updateUI() {
         if (!this._panelLabel) return;
 
+        const lang = getLanguage(this._settings);
         const minutes = Math.floor(this._timeLeftSec / 60);
         const seconds = this._timeLeftSec % 60;
         const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
 
         if (this._isIdle) {
-            this._panelLabel.set_text('💤 Nghỉ ngơi');
-            if (this._statusItem) this._statusItem.label.set_text('Trạng thái: Tạm dừng (Không hoạt động)');
+            this._panelLabel.set_text(t(lang, 'panel_idle'));
+            if (this._statusItem) this._statusItem.label.set_text(t(lang, 'status_idle'));
         } else if (this._isPaused) {
-            this._panelLabel.set_text('🧘 Tạm dừng');
-            if (this._statusItem) this._statusItem.label.set_text('Trạng thái: Tạm dừng');
+            this._panelLabel.set_text(t(lang, 'panel_paused'));
+            if (this._statusItem) this._statusItem.label.set_text(t(lang, 'status_paused'));
         } else {
-            this._panelLabel.set_text(`🧘 ${timeStr}`);
-            if (this._statusItem) this._statusItem.label.set_text(`Trạng thái: Hoạt động (${timeStr} còn lại)`);
+            this._panelLabel.set_text(t(lang, 'panel_working', { time: timeStr }));
+            if (this._statusItem) this._statusItem.label.set_text(t(lang, 'status_active', { time: timeStr }));
         }
     }
 
